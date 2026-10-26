@@ -14,6 +14,9 @@ function num(n) { return 'n-' + Math.round(n); }
 function say(s) {
   return 't-' + String(s).replace(/[.&,=\r\n*#]/g, ' ').replace(/\s+/g, ' ').trim();
 }
+function menuPrompt() {
+  return 'read=' + [say('ברוכים הבאים למערכת תוצאות הבחירות'), say('לחלוקת המנדטים הקישו 1'), say('למספר הקולות לכל רשימה הקישו 2'), say('לנתוני ההצבעה הכלליים הקישו 3'), say('לסיכום הכללי הקישו 4'), say('ליציאה הקישו 0')].join('.') + '=CHOICE,,1,1,8,NO,yes,no,,01234';
+}
 function message(parts) {
   return 'id_list_message=' + parts.join('.') + '&go_to_folder=/';
 }
@@ -48,11 +51,16 @@ export default async function handler(req, res) {
   const id = (++requestCounter) + '-' + Date.now().toString(36);
   const started = Date.now();
   const { year, menu, city } = getParams(req);
+  const requestUrl = new URL(req.url, 'https://example.invalid');
+  const choice = requestUrl.searchParams.get('CHOICE');
+  const selected = choice === '1' ? '1' : choice === '2' ? '2' : choice === '3' ? '3' : '0';
   // Deliberately never log full URL, headers, body or telephony identifiers.
-  log('request_start', { id, method: req.method, year, menu, cityRequested: Boolean(city) });
+  log('request_start', { id, method: req.method, year, menu, choice: /^[0-4]$/.test(choice || '') ? choice : null, cityRequested: Boolean(city) });
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
   try {
+    if (choice === null && menu === '0') { log('menu_prompt', { id }); return res.status(200).send(menuPrompt()); }
+    if (choice === '0') return res.status(200).send('go_to_folder=..');
     const source = year === '26' ? (process.env.CSV_URL_26 || SOURCES['26']) : (process.env.CSV_URL_25 || SOURCES['25']);
     const previous = cache.get(source);
     let data = previous?.data;
@@ -75,9 +83,9 @@ export default async function handler(req, res) {
         if (!data) throw err;
       }
     } else log('cache_hit', { id, ageMs: Date.now() - previous.at });
-    const result = speak(data, menu, city);
+    const result = speak(data, choice === '4' ? '0' : choice === null ? menu : selected, city);
     log('response_success', { id, durationMs: Date.now() - started, responseChars: result.length, responsePreview: result.slice(0, 250) });
-    return res.status(200).send(result);
+    return res.status(200).send(result + '&go_to_folder=./');
   } catch (err) {
     log('request_error', { id, durationMs: Date.now() - started, error: String(err?.message || err) });
     return res.status(200).send(message([say('נתוני הבחירות אינם זמינים כרגע נסו שוב מאוחר יותר')]));
