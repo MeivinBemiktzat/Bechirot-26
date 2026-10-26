@@ -8,7 +8,7 @@
 ## הגדרת שלוחה בימות המשיח
 ```ini
 type=api
-api_link=https://YOUR-PROJECT.vercel.app/api/index?year=25
+api_link=https://bechirot-26.vercel.app/api/index?year=25
 ```
 יש להחליף את YOUR-PROJECT בכתובת הפריסה בפועל.
 
