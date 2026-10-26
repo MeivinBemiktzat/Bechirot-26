@@ -19,29 +19,29 @@ function partyName(code, year) { return year === '25' ? (PARTY_NAMES_25[code] ||
 function menuPrompt() {
   return 'read=' + [say('ברוכים הבאים למערכת תוצאות הבחירות'), say('לחלוקת המנדטים הקישו 1'), say('למספר הקולות לכל רשימה הקישו 2'), say('לנתוני ההצבעה הכלליים הקישו 3'), say('לסיכום הכללי הקישו 4'), say('ליציאה הקישו 0')].join('.') + '=CHOICE,,1,1,8,NO,yes,no,,01234,,,,,no';
 }
-function message(parts) {
-  return 'id_list_message=' + parts.join('.') + '&go_to_folder=/5';
+function message(parts, returnFolder) {
+  return 'id_list_message=' + parts.join('.') + '&go_to_folder=' + returnFolder;
 }
-function speak(data, menu, city, year) {
+function speak(data, menu, city, year, returnFolder) {
   const t = data.totals;
   if (menu === '1') {
     const allocation = allocateMandates(data.parties, t.valid, []);
     const parts = [say('חלוקת מנדטים מחושבת ללא הסכמי עודפים')];
     for (const p of allocation.parties) if (p.mandates) parts.push(say(partyName(p.letters, year)), num(p.mandates), say('מנדטים'));
-    return message(parts);
+    return message(parts, returnFolder);
   }
   if (menu === '2') {
-    const parts = [say('תוצאות לפי אותיות הרשימות')];
-    for (const p of data.parties.slice(0, 15)) parts.push(say('רשימה ' + p.letters), num(p.votes), say('קולות'));
-    return message(parts);
+    const parts = [say('מספר הקולות לכל רשימה')];
+    for (const p of data.parties.slice(0, 15)) parts.push(say(partyName(p.letters, year)), num(p.votes), say('קולות'));
+    return message(parts, returnFolder);
   }
-  if (menu === '3') return message([say('אחוז ההצבעה'), num(Math.floor(data.turnout)), say('אחוז'), say('מספר המצביעים'), num(t.voters), say('קולות כשרים'), num(t.valid), say('קולות פסולים'), num(t.invalid)]);
+  if (menu === '3') return message([say('אחוז ההצבעה'), num(Math.floor(data.turnout)), say('אחוז'), say('מספר המצביעים'), num(t.voters), say('קולות כשרים'), num(t.valid), say('קולות פסולים'), num(t.invalid)], returnFolder);
   if (menu === '4') {
     const found = data.cities.find(c => c.name === city);
-    if (!city || !found) return message([say('היישוב המבוקש לא נמצא')]);
-    return message([say('ביישוב ' + city + ' הצביעו'), num(found.voters), say('מצביעים'), num(found.valid), say('קולות כשרים')]);
+    if (!city || !found) return message([say('היישוב המבוקש לא נמצא')], returnFolder);
+    return message([say('ביישוב ' + city + ' הצביעו'), num(found.voters), say('מצביעים'), num(found.valid), say('קולות כשרים')], returnFolder);
   }
-  return message([say('סיכום תוצאות הבחירות'), say('מספר המצביעים'), num(t.voters), say('אחוז ההצבעה'), num(Math.floor(data.turnout)), say('אחוז'), say('קולות כשרים'), num(t.valid), say('קולות פסולים'), num(t.invalid)]);
+  return message([say('סיכום תוצאות הבחירות'), say('מספר המצביעים'), num(t.voters), say('אחוז ההצבעה'), num(Math.floor(data.turnout)), say('אחוז'), say('קולות כשרים'), num(t.valid), say('קולות פסולים'), num(t.invalid)], returnFolder);
 }
 function getParams(req) {
   const raw = new URL(req.url, 'https://example.invalid');
@@ -55,6 +55,8 @@ export default async function handler(req, res) {
   const { year, menu, city } = getParams(req);
   const requestUrl = new URL(req.url, 'https://example.invalid');
   const choice = requestUrl.searchParams.get('CHOICE');
+  const ext = requestUrl.searchParams.get('ApiExtension');
+  const returnFolder = ext && /^(?:[0-9]+)(?:\/[0-9]+)*$/.test(ext) ? '/' + ext : './';
   const selected = choice === '1' ? '1' : choice === '2' ? '2' : choice === '3' ? '3' : '0';
   // Deliberately never log full URL, headers, body or telephony identifiers.
   log('request_start', { id, method: req.method, year, menu, choice: /^[0-4]$/.test(choice || '') ? choice : null, cityRequested: Boolean(city) });
@@ -62,7 +64,7 @@ export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   try {
     if (choice === null && menu === '0') { log('menu_prompt', { id }); return res.status(200).send(menuPrompt()); }
-    if (choice === '0') return res.status(200).send('go_to_folder=..');
+    if (choice === '0') return res.status(200).send('go_to_folder=/');
     const source = year === '26' ? (process.env.CSV_URL_26 || SOURCES['26']) : (process.env.CSV_URL_25 || SOURCES['25']);
     const previous = cache.get(source);
     let data = previous?.data;
@@ -85,7 +87,7 @@ export default async function handler(req, res) {
         if (!data) throw err;
       }
     } else log('cache_hit', { id, ageMs: Date.now() - previous.at });
-    const result = speak(data, choice === '4' ? '0' : choice === null ? menu : selected, city, year);
+    const result = speak(data, choice === '4' ? '0' : choice === null ? menu : selected, city, year, returnFolder);
     log('response_success', { id, durationMs: Date.now() - started, responseChars: result.length, responsePreview: result.slice(0, 250) });
     return res.status(200).send(result);
   } catch (err) {
