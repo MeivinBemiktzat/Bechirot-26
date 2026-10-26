@@ -1,3 +1,4 @@
+import { allocateMandates } from '../lib/mandates.js';
 import { analyze } from '../lib/elections.js';
 
 const SOURCES = {
@@ -18,6 +19,12 @@ function message(parts) {
 }
 function speak(data, menu, city) {
   const t = data.totals;
+  if (menu === '1') {
+    const allocation = allocateMandates(data.parties, t.valid, []);
+    const parts = [say('חלוקת מנדטים מחושבת ללא הסכמי עודפים')];
+    for (const p of allocation.parties) if (p.mandates) parts.push(say('רשימה ' + p.letters), num(p.mandates), say('מנדטים'));
+    return message(parts);
+  }
   if (menu === '2') {
     const parts = [say('תוצאות לפי אותיות הרשימות')];
     for (const p of data.parties.slice(0, 15)) parts.push(say('רשימה ' + p.letters), num(p.votes), say('קולות'));
