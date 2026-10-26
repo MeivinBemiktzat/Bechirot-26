@@ -14,18 +14,20 @@ function num(n) { return 'n-' + Math.round(n); }
 function say(s) {
   return 't-' + String(s).replace(/[.&,=\r\n*#]/g, ' ').replace(/\s+/g, ' ').trim();
 }
+const PARTY_NAMES_25 = { 'מחל':'הליכוד', 'פה':'יש עתיד', 'ט':'הציונות הדתית', 'כן':'המחנה הממלכתי', 'שס':'שס', 'ג':'יהדות התורה', 'ל':'ישראל ביתנו', 'עם':'רע״ם', 'ום':'חדש תעל', 'אמת':'העבודה', 'מרצ':'מרצ' };
+function partyName(code, year) { return year === '25' ? (PARTY_NAMES_25[code] || 'רשימה באותיות ' + code) : 'רשימה באותיות ' + code; }
 function menuPrompt() {
-  return 'read=' + [say('ברוכים הבאים למערכת תוצאות הבחירות'), say('לחלוקת המנדטים הקישו 1'), say('למספר הקולות לכל רשימה הקישו 2'), say('לנתוני ההצבעה הכלליים הקישו 3'), say('לסיכום הכללי הקישו 4'), say('ליציאה הקישו 0')].join('.') + '=CHOICE,,1,1,8,NO,yes,no,,01234';
+  return 'read=' + [say('ברוכים הבאים למערכת תוצאות הבחירות'), say('לחלוקת המנדטים הקישו 1'), say('למספר הקולות לכל רשימה הקישו 2'), say('לנתוני ההצבעה הכלליים הקישו 3'), say('לסיכום הכללי הקישו 4'), say('ליציאה הקישו 0')].join('.') + '=CHOICE,,1,1,8,NO,yes,no,,01234,,,,,no';
 }
 function message(parts) {
-  return 'id_list_message=' + parts.join('.') + '&go_to_folder=/';
+  return 'id_list_message=' + parts.join('.') + '&go_to_folder=/5';
 }
-function speak(data, menu, city) {
+function speak(data, menu, city, year) {
   const t = data.totals;
   if (menu === '1') {
     const allocation = allocateMandates(data.parties, t.valid, []);
     const parts = [say('חלוקת מנדטים מחושבת ללא הסכמי עודפים')];
-    for (const p of allocation.parties) if (p.mandates) parts.push(say('רשימה ' + p.letters), num(p.mandates), say('מנדטים'));
+    for (const p of allocation.parties) if (p.mandates) parts.push(say(partyName(p.letters, year)), num(p.mandates), say('מנדטים'));
     return message(parts);
   }
   if (menu === '2') {
@@ -83,9 +85,9 @@ export default async function handler(req, res) {
         if (!data) throw err;
       }
     } else log('cache_hit', { id, ageMs: Date.now() - previous.at });
-    const result = speak(data, choice === '4' ? '0' : choice === null ? menu : selected, city);
+    const result = speak(data, choice === '4' ? '0' : choice === null ? menu : selected, city, year);
     log('response_success', { id, durationMs: Date.now() - started, responseChars: result.length, responsePreview: result.slice(0, 250) });
-    return res.status(200).send(result + '&go_to_folder=./');
+    return res.status(200).send(result);
   } catch (err) {
     log('request_error', { id, durationMs: Date.now() - started, error: String(err?.message || err) });
     return res.status(200).send(message([say('נתוני הבחירות אינם זמינים כרגע נסו שוב מאוחר יותר')]));
