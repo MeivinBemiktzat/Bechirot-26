@@ -1,44 +1,78 @@
 import { analyze } from '../lib/elections.js';
-const DEFAULT_25 = 'https://media25.bechirot.gov.il/files/expc.csv';
-const DEFAULT_26 = 'https://media26.bechirot.gov.il/files/expc.csv';
-let cache = new Map();
-const fmt = n => new Intl.NumberFormat('he-IL').format(n);
-function speak(data, menu, city) {
- const t = data.totals;
- if (menu === '2') return 'תוצאות לפי אותיות הרשימות. ' + data.parties.slice(0,20).map(p=> 'רשימה '+p.letters+', '+fmt(p.votes)+' קולות').join('. ');
- if (menu === '3') return 'אחוז ההצבעה '+data.turnout+' אחוז. '+fmt(t.voters)+' מצביעים. '+fmt(t.valid)+' קולות כשרים. '+fmt(t.invalid)+' קולות פסולים.';
- if (menu === '4') {
-   if (!city) return 'לא הוזן שם יישוב.';
-   const c = data.cities.find(x=>x.name === city);
-   return c ? 'ביישוב '+city+' הצביעו '+fmt(c.voters)+' מצביעים. '+fmt(c.valid)+' קולות כשרים.' : 'היישוב המבוקש לא נמצא.';
- }
- return 'סיכום תוצאות הבחירות. '+fmt(t.voters)+' מצביעים. אחוז ההצבעה '+data.turnout+' אחוז. '+fmt(t.valid)+' קולות כשרים. '+fmt(t.invalid)+' קולות פסולים.';
+
+const SOURCES = {
+  '25': 'https://media25.bechirot.gov.il/files/expc.csv',
+  '26': 'https://media26.bechirot.gov.il/files/expc.csv'
+};
+const cache = new Map();
+let requestCounter = 0;
+function log(event, details = {}) {
+  console.log(JSON.stringify({ service: 'bechirot-ivr', event, time: new Date().toISOString(), ...details }));
 }
-export default async function handler(req,res) {
- try {
-  const url = new URL(req.url,'https://example.com');
-  const year = url.searchParams.get('year') === '26' ? '26' : '25';
-  const menu = url.searchParams.get('menu') || url.searchParams.get('ApiExtension') || '0';
-  const city = url.searchParams.get('city') || '';
-  const source = year === '26' ? (process.env.CSV_URL_26 || DEFAULT_26) : (process.env.CSV_URL_25 || DEFAULT_25);
-  const now = Date.now(), cached = cache.get(source);
-  let data = cached?.data;
-  if (!data || now - cached.at > 60000) {
-   try {
-    const response = await fetch(source, {signal:AbortSignal.timeout(12000),headers:{'User-Agent':'Bechirot-IVR/1.0'}});
-    if (!response.ok) throw new Error('SOURCE_HTTP_'+response.status);
-    const csv = await response.text();
-    if (csv.length > 15000000) throw new Error('CSV_TOO_LARGE');
-    data = analyze(csv); cache.set(source,{at:now,data});
-   } catch (err) { if (!data) throw err; }
+function num(n) { return 'n-' + Math.round(n); }
+function say(s) {
+  return 't-' + String(s).replace(/[.&,=\r\n*#]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+function message(parts) {
+  return 'id_list_message=' + parts.join('.') + '&go_to_folder=/';
+}
+function speak(data, menu, city) {
+  const t = data.totals;
+  if (menu === '2') {
+    const parts = [say('תוצאות לפי אותיות הרשימות')];
+    for (const p of data.parties.slice(0, 15)) parts.push(say('רשימה ' + p.letters), num(p.votes), say('קולות'));
+    return message(parts);
   }
-  const text = speak(data,menu,city).replace(/[\r\n]/g,' ');
-  res.setHeader('Content-Type','text/plain; charset=utf-8');
-  res.setHeader('Cache-Control','no-store');
-  return res.status(200).send('id_list_message=t-'+text+'&go_to_folder=/');
- } catch (err) {
-  console.error('Election data unavailable',err.message);
-  res.setHeader('Content-Type','text/plain; charset=utf-8');
-  return res.status(200).send('id_list_message=t-נתוני הבחירות אינם זמינים כרגע. נסו שוב מאוחר יותר.&go_to_folder=/');
- }
+  if (menu === '3') return message([say('אחוז ההצבעה'), num(Math.floor(data.turnout)), say('אחוז'), say('מספר המצביעים'), num(t.voters), say('קולות כשרים'), num(t.valid), say('קולות פסולים'), num(t.invalid)]);
+  if (menu === '4') {
+    const found = data.cities.find(c => c.name === city);
+    if (!city || !found) return message([say('היישוב המבוקש לא נמצא')]);
+    return message([say('ביישוב ' + city + ' הצביעו'), num(found.voters), say('מצביעים'), num(found.valid), say('קולות כשרים')]);
+  }
+  return message([say('סיכום תוצאות הבחירות'), say('מספר המצביעים'), num(t.voters), say('אחוז ההצבעה'), num(Math.floor(data.turnout)), say('אחוז'), say('קולות כשרים'), num(t.valid), say('קולות פסולים'), num(t.invalid)]);
+}
+function getParams(req) {
+  const raw = new URL(req.url, 'https://example.invalid');
+  // Compatibility with legacy links containing ?year=25?ApiCallId=...
+  const year = raw.searchParams.get('year')?.match(/^2[56]/)?.[0] || '25';
+  return { year, menu: raw.searchParams.get('menu') || '0', city: raw.searchParams.get('city') || '' };
+}
+export default async function handler(req, res) {
+  const id = (++requestCounter) + '-' + Date.now().toString(36);
+  const started = Date.now();
+  const { year, menu, city } = getParams(req);
+  // Deliberately never log full URL, headers, body or telephony identifiers.
+  log('request_start', { id, method: req.method, year, menu, cityRequested: Boolean(city) });
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  try {
+    const source = year === '26' ? (process.env.CSV_URL_26 || SOURCES['26']) : (process.env.CSV_URL_25 || SOURCES['25']);
+    const previous = cache.get(source);
+    let data = previous?.data;
+    if (!previous || Date.now() - previous.at > 60000) {
+      log('csv_fetch_start', { id, year, cachedFallback: Boolean(previous) });
+      try {
+        const fetchStart = Date.now();
+        const response = await fetch(source, { signal: AbortSignal.timeout(12000) });
+        log('csv_fetch_response', { id, status: response.status, durationMs: Date.now() - fetchStart, contentLength: response.headers.get('content-length') });
+        if (!response.ok) throw new Error('SOURCE_HTTP_' + response.status);
+        const csv = await response.text();
+        log('csv_downloaded', { id, chars: csv.length });
+        if (csv.length > 15000000) throw new Error('CSV_TOO_LARGE');
+        const parseStart = Date.now();
+        data = analyze(csv);
+        cache.set(source, { at: Date.now(), data });
+        log('csv_parsed', { id, durationMs: Date.now() - parseStart, rows: data.localityCount, parties: data.parties.length, voters: data.totals.voters, valid: data.totals.valid });
+      } catch (err) {
+        log('csv_fetch_error', { id, error: String(err?.message || err), fallback: Boolean(data) });
+        if (!data) throw err;
+      }
+    } else log('cache_hit', { id, ageMs: Date.now() - previous.at });
+    const result = speak(data, menu, city);
+    log('response_success', { id, durationMs: Date.now() - started, responseChars: result.length, responsePreview: result.slice(0, 250) });
+    return res.status(200).send(result);
+  } catch (err) {
+    log('request_error', { id, durationMs: Date.now() - started, error: String(err?.message || err) });
+    return res.status(200).send(message([say('נתוני הבחירות אינם זמינים כרגע נסו שוב מאוחר יותר')]));
+  }
 }
