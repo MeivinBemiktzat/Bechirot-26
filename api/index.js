@@ -66,6 +66,7 @@ export default async function handler(req, res) {
     if (choice === null && menu === '0') { log('menu_prompt', { id }); return res.status(200).send(menuPrompt()); }
     if (choice === '0') return res.status(200).send('go_to_folder=/');
     const source = year === '26' ? (process.env.CSV_URL_26 || SOURCES['26']) : (process.env.CSV_URL_25 || SOURCES['25']);
+    log('source_selected', {id, year, sourceKind: process.env['CSV_URL_' + year] ? 'environment' : 'default'});
     const previous = cache.get(source);
     let data = previous?.data;
     if (!previous || Date.now() - previous.at > 60000) {
@@ -76,6 +77,9 @@ export default async function handler(req, res) {
         log('csv_fetch_response', { id, status: response.status, durationMs: Date.now() - fetchStart, contentLength: response.headers.get('content-length') });
         if (!response.ok) throw new Error('SOURCE_HTTP_' + response.status);
         const csv = await response.text();
+        log('csv_payload_info', { id, contentType: response.headers.get('content-type'), bytes: Buffer.byteLength(csv), prefix: csv.slice(0, 60).replace(/[^א-תa-zA-Z0-9,]/g, ' ') });
+        if (!csv.trim()) throw new Error('CSV_EMPTY_RESPONSE');
+        if (!csv.includes('מצביעים') || !csv.includes('כשרים')) throw new Error('CSV_UNEXPECTED_CONTENT');
         log('csv_downloaded', { id, chars: csv.length });
         if (csv.length > 15000000) throw new Error('CSV_TOO_LARGE');
         const parseStart = Date.now();
